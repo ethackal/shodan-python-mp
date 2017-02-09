@@ -1,0 +1,80 @@
+#!/usr/local/opt/python/bin/python2.7 
+import imp
+import os
+import shodan
+import shodan.cli.helpers
+
+def mp_init(self, key):
+    self._original___init__(key)
+    self.base_url=os.environ.get('SHODAN_API_PROXY', 'https://api.shodan.io')
+    self.base_exploits_url=os.environ.get('SHODAN_EXPLOITS_API_PROXY', 'https://exploits.shodan.io')
+
+def mp_get_api_key():
+    return ''
+
+def mp_request(self, function, params, service='shodan', method='get'):
+    """General-purpose function to create web requests to SHODAN.
+    
+    Arguments:
+        function  -- name of the function you want to execute
+        params    -- dictionary of parameters for the function
+    
+    Returns
+        A dictionary containing the function's results.
+    
+    """
+    # Add the API key parameter automatically
+    #params['key'] = self.api_key
+    
+    # Determine the base_url based on which service we're interacting with
+    base_url = {
+        'shodan': self.base_url,
+        'exploits': self.base_exploits_url,
+    }.get(service, 'shodan')
+
+    # Send the request
+    try:
+        if method.lower() == 'post':
+            data = self._session.post(base_url + function, params)
+        else:
+            data = self._session.get(base_url + function, params=params)
+    except:
+        raise APIError('Unable to connect to Shodan')
+
+    # Check that the API key wasn't rejected
+    if data.status_code == 401:
+        try:
+            # Return the actual error message if the API returned valid JSON
+            error = data.json()['error']
+        except Exception as e:
+            error = 'Invalid API key'
+        
+        raise APIError(error)
+    
+    # Parse the text into JSON
+    try:
+        data = data.json()
+    except:
+        raise APIError('Unable to parse JSON response')
+    
+    # Raise an exception if an error occurred
+    if type(data) == dict and 'error' in data:
+        raise APIError(data['error'])
+    
+    # Return the data
+    return data
+
+shodan.Shodan._original___init__ = shodan.Shodan.__init__
+shodan.Shodan.__init__ = mp_init
+
+shodan.cli.helpers._original_get_api_key = shodan.cli.helpers.get_api_key
+shodan.cli.helpers.get_api_key = mp_get_api_key
+
+shodan.Shodan._original__request = shodan.Shodan._request
+shodan.Shodan._request = mp_request
+
+cli = imp.load_source('cli', os.environ.get('SHODAN_CLI', '/usr/local/bin/shodan'))
+from cli import *
+
+if __name__ == '__main__':
+  main() 
